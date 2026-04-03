@@ -315,16 +315,113 @@ export async function streamPerplexity(
   }
 }
 
+export async function streamOllama(
+  modelName: string, // For Ollama, the "API Key" field will hold the model name
+  prompt: string,
+  history: { role: string; content: string }[],
+  cb: StreamCallbacks,
+  signal?: AbortSignal
+) {
+  try {
+    const model = modelName || 'llama3.2'; // Default to llama3.2 if empty
+    const res = await fetch('http://localhost:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [...history, { role: 'user', content: prompt }],
+        stream: true,
+      }),
+      signal,
+    });
+
+    if (!res.ok) {
+      cb.onError("Ollama not found. Make sure the Ollama app is running on your PC.");
+      return;
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Ollama uses a slightly different JSON format than OpenAI
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const json = JSON.parse(line);
+          if (json.message?.content) cb.onDelta(json.message.content);
+          if (json.done) cb.onDone();
+        } catch (e) {}
+      }
+    }
+  } catch (e: any) {
+    cb.onError("Ollama Error: Ensure Ollama is running locally (http://localhost:11434)");
+  }
+}
+
 export interface ModelConfig {
   id: ModelId;
   label: string;
   streamFn: (apiKey: string, prompt: string, history: { role: string; content: string }[], cb: StreamCallbacks, signal?: AbortSignal) => Promise<void>;
   apiKeyField: keyof import('@/store/chatStore').ApiKeys;
 }
+export async function streamDeepSeek(
+  apiKey: string,
+  prompt: string,
+  history: { role: string; content: string }[],
+  cb: StreamCallbacks,
+  signal?: AbortSignal
+) {
+  try {
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [...history, { role: 'user', content: prompt }],
+        stream: true,
+      }),
+      signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      cb.onError(`DeepSeek error ${res.status}: ${text.slice(0, 200)}`);
+      return;
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = parseSSE(buffer, (json) => {
+        const text = json?.choices?.[0]?.delta?.content;
+        if (text) cb.onDelta(text);
+      });
+    }
+    cb.onDone();
+  } catch (e: any) {
+    if (e.name !== 'AbortError') cb.onError(e.message);
+  }
+}
 
 export const MODEL_CONFIGS: ModelConfig[] = [
   { id: 'gemini', label: 'Gemini 2.5 Flash', streamFn: streamGemini, apiKeyField: 'gemini' },
-  { id: 'gpt', label: 'GPT-4o', streamFn: streamOpenAI, apiKeyField: 'openai' },
+  { id: 'gpt', label: 'ChatGPT (GPT-4o mini)', streamFn: streamOpenAI, apiKeyField: 'openai' }, // UPDATED LABEL
+  { id: 'ollama', label: 'Ollama (Local Free)', streamFn: streamOllama, apiKeyField: 'ollama' }, // NEW FREE TOOL
   { id: 'groq', label: 'Groq (Llama 3)', streamFn: streamGroq, apiKeyField: 'groq' },
   { id: 'huggingface', label: 'HuggingFaceH4/zephyr-7b-beta', streamFn: streamHuggingFace, apiKeyField: 'huggingface' },
   { id: 'claude', label: 'Claude Sonnet 4 (Requires Payment)', streamFn: streamClaude, apiKeyField: 'claude' },

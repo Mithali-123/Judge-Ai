@@ -15,6 +15,8 @@ const MODEL_ICONS: Record<ModelId, { icon: React.ElementType; className: string 
   perplexity: { icon: Search, className: 'text-perplexity' },
   groq: { icon: Zap, className: 'text-green-400' },
   huggingface: { icon: Box, className: 'text-yellow-400' },
+  deepseek: { icon: Brain, className: 'text-blue-400' },
+  ollama: { icon: Zap, className: 'text-orange-400' }, // Ollama Icon
 };
 
 const SUGGESTIONS = [

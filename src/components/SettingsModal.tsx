@@ -18,8 +18,68 @@ const API_GUIDES = {
     ],
     link: 'https://aistudio.google.com/apikey',
   },
+  groq: {
+    name: 'Groq (Free & Fast)',
+    icon: Zap,
+    color: 'text-green-400',
+    borderColor: 'border-green-400/20',
+    bgColor: 'bg-green-400/5',
+    placeholder: 'gsk_...',
+    steps: [
+      { text: 'Go to Groq Console', url: 'https://console.groq.com/keys' },
+      { text: 'Sign in or create an account' },
+      { text: 'Click "Create API Key"' },
+      { text: 'Copy the key and paste it below' },
+    ],
+    link: 'https://console.groq.com/keys',
+  },
+  huggingface: {
+    name: 'Hugging Face (Free)',
+    icon: Box,
+    color: 'text-yellow-400',
+    borderColor: 'border-yellow-400/20',
+    bgColor: 'bg-yellow-400/5',
+    placeholder: 'hf_...',
+    steps: [
+      { text: 'Go to Hugging Face Settings', url: 'https://huggingface.co/settings/tokens' },
+      { text: 'Sign in or create an account' },
+      { text: 'Click "New token" (Role: Read)' },
+      { text: 'Copy the token and paste it below' },
+    ],
+    link: 'https://huggingface.co/settings/tokens',
+  },
+  deepseek: {
+    name: 'DeepSeek-V3 (5M Free Tokens)',
+    icon: Brain,
+    color: 'text-blue-400',
+    borderColor: 'border-blue-400/20',
+    bgColor: 'bg-blue-400/5',
+    placeholder: 'sk-...',
+    steps: [
+      { text: 'Go to DeepSeek Platform', url: 'https://platform.deepseek.com/' },
+      { text: 'Sign up to get 5 Million free tokens (No card required)' },
+      { text: 'Click "API Keys" and create a new key' },
+      { text: 'Copy the key and paste it below' },
+    ],
+    link: 'https://platform.deepseek.com/',
+  },
+  ollama: {
+    name: 'Ollama (Local AI - 100% Free)',
+    icon: Zap,
+    color: 'text-orange-400',
+    borderColor: 'border-orange-400/20',
+    bgColor: 'bg-orange-400/5',
+    placeholder: 'e.g., llama3.2, mistral, or gemma',
+    steps: [
+      { text: 'Download & install Ollama', url: 'https://ollama.com/' },
+      { text: 'Run "ollama run llama3.2" in your terminal' },
+      { text: 'Keep the Ollama app open on your PC' },
+      { text: 'Enter the model name below (default: llama3.2)' },
+    ],
+    link: 'https://ollama.com/',
+  },
   openai: {
-    name: 'OpenAI (GPT-4o)',
+    name: 'OpenAI (GPT-4o mini)',
     icon: Cpu,
     color: 'text-gpt',
     borderColor: 'border-gpt/20',
@@ -27,10 +87,8 @@ const API_GUIDES = {
     placeholder: 'sk-...',
     steps: [
       { text: 'Go to OpenAI API Keys page', url: 'https://platform.openai.com/api-keys' },
-      { text: 'Sign in or create an account' },
-      { text: 'Click "Create new secret key"' },
-      { text: 'Add billing credits to use the API', url: 'https://platform.openai.com/settings/organization/billing/overview' },
-      { text: 'Copy the key and paste it below' },
+      { text: 'GPT-4o mini is 20x cheaper than GPT-4o!' },
+      { text: 'New accounts often get $5 free credits.' },
     ],
     link: 'https://platform.openai.com/api-keys',
   },
@@ -66,36 +124,6 @@ const API_GUIDES = {
     ],
     link: 'https://www.perplexity.ai/settings/api',
   },
-  groq: {
-    name: 'Groq (Free & Fast)',
-    icon: Zap,
-    color: 'text-green-400',
-    borderColor: 'border-green-400/20',
-    bgColor: 'bg-green-400/5',
-    placeholder: 'gsk_...',
-    steps: [
-      { text: 'Go to Groq Console', url: 'https://console.groq.com/keys' },
-      { text: 'Sign in or create an account' },
-      { text: 'Click "Create API Key"' },
-      { text: 'Copy the key and paste it below' },
-    ],
-    link: 'https://console.groq.com/keys',
-  },
-  huggingface: {
-    name: 'Hugging Face (Free)',
-    icon: Box,
-    color: 'text-yellow-400',
-    borderColor: 'border-yellow-400/20',
-    bgColor: 'bg-yellow-400/5',
-    placeholder: 'hf_...',
-    steps: [
-      { text: 'Go to Hugging Face Settings', url: 'https://huggingface.co/settings/tokens' },
-      { text: 'Sign in or create an account' },
-      { text: 'Click "New token" (Role: Read)' },
-      { text: 'Copy the token and paste it below' },
-    ],
-    link: 'https://huggingface.co/settings/tokens',
-  },
 };
 
 type GuideKey = keyof typeof API_GUIDES;
@@ -119,10 +147,15 @@ export function SettingsModal() {
     setSettingsOpen(false);
   };
 
-  const guideEntries: { key: GuideKey; field: keyof typeof keys }[] = [
+  const freeModels: { key: GuideKey; field: keyof typeof keys }[] = [
     { key: 'gemini', field: 'gemini' },
     { key: 'groq', field: 'groq' },
     { key: 'huggingface', field: 'huggingface' },
+    { key: 'deepseek', field: 'deepseek' },
+    { key: 'ollama', field: 'ollama' },
+  ];
+
+  const paidModels: { key: GuideKey; field: keyof typeof keys }[] = [
     { key: 'openai', field: 'openai' },
     { key: 'claude', field: 'claude' },
     { key: 'perplexity', field: 'perplexity' },
@@ -149,23 +182,44 @@ export function SettingsModal() {
 
         <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
           {/* Security note */}
-          <div className="flex items-start gap-2.5 rounded-xl bg-secondary/50 p-3 text-xs text-muted-foreground">
+          <div className="flex items-start gap-2.5 rounded-xl bg-secondary/50 p-3 text-xs text-muted-foreground mb-4">
             <Shield className="h-4 w-4 shrink-0 mt-0.5 text-primary/70" />
-            <span>Your keys are stored in your browser's local storage. They are <strong className="text-foreground">never</strong> sent to any server other than the respective AI provider. You only need <strong className="text-foreground">at least one</strong> key to start.</span>
+            <span>Your keys are stored in your browser's local storage. They are <strong className="text-foreground">never</strong> sent to any server other than the respective AI provider.</span>
           </div>
 
-          {guideEntries.map(({ key, field }) => (
-            <KeySection
-              key={key}
-              guide={API_GUIDES[key]}
-              value={keys[field]}
-              onChange={v => setKeys({ ...keys, [field]: v })}
-              show={!!showKeys[key]}
-              onToggleShow={() => setShowKeys(s => ({ ...s, [key]: !s[key] }))}
-              expanded={expandedGuide === key}
-              onToggleExpand={() => setExpandedGuide(expandedGuide === key ? null : key)}
-            />
-          ))}
+          {/* FREE MODELS SECTION */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider px-1">Free Models</h3>
+            {freeModels.map(({ key, field }) => (
+              <KeySection
+                key={key}
+                guide={API_GUIDES[key]}
+                value={keys[field]}
+                onChange={v => setKeys({ ...keys, [field]: v })}
+                show={!!showKeys[key]}
+                onToggleShow={() => setShowKeys(s => ({ ...s, [key]: !s[key] }))}
+                expanded={expandedGuide === key}
+                onToggleExpand={() => setExpandedGuide(expandedGuide === key ? null : key)}
+              />
+            ))}
+          </div>
+
+          {/* PAID MODELS SECTION */}
+          <div className="space-y-4 pt-4 border-t border-border/50">
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider px-1">Paid Models</h3>
+            {paidModels.map(({ key, field }) => (
+              <KeySection
+                key={key}
+                guide={API_GUIDES[key]}
+                value={keys[field]}
+                onChange={v => setKeys({ ...keys, [field]: v })}
+                show={!!showKeys[key]}
+                onToggleShow={() => setShowKeys(s => ({ ...s, [key]: !s[key] }))}
+                expanded={expandedGuide === key}
+                onToggleExpand={() => setExpandedGuide(expandedGuide === key ? null : key)}
+              />
+            ))}
+          </div>
         </div>
 
         {/* Footer */}
