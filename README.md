@@ -57,4 +57,4 @@ If you find **Judge AI** useful for your workflow, consider supporting its devel
 
 ---
 
-**Author:** [Mitahli] [Github](https://github.com/Mithali-123)
+**Author:** **Mithali** [Github](https://github.com/Mithali-123)
