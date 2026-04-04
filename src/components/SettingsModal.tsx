@@ -33,48 +33,18 @@ const API_GUIDES = {
     ],
     link: 'https://console.groq.com/keys',
   },
-  huggingface: {
-    name: 'Hugging Face (Free)',
-    icon: Box,
-    color: 'text-yellow-400',
-    borderColor: 'border-yellow-400/20',
-    bgColor: 'bg-yellow-400/5',
-    placeholder: 'hf_...',
-    steps: [
-      { text: 'Go to Hugging Face Settings', url: 'https://huggingface.co/settings/tokens' },
-      { text: 'Sign in or create an account' },
-      { text: 'Click "New token" (Role: Read)' },
-      { text: 'Copy the token and paste it below' },
-    ],
-    link: 'https://huggingface.co/settings/tokens',
-  },
-  deepseek: {
-    name: 'DeepSeek-V3 (5M Free Tokens)',
-    icon: Brain,
-    color: 'text-blue-400',
-    borderColor: 'border-blue-400/20',
-    bgColor: 'bg-blue-400/5',
-    placeholder: 'sk-...',
-    steps: [
-      { text: 'Go to DeepSeek Platform', url: 'https://platform.deepseek.com/' },
-      { text: 'Sign up to get 5 Million free tokens (No card required)' },
-      { text: 'Click "API Keys" and create a new key' },
-      { text: 'Copy the key and paste it below' },
-    ],
-    link: 'https://platform.deepseek.com/',
-  },
   ollama: {
-    name: 'Ollama (Local AI - 100% Free)',
-    icon: Zap,
+    name: 'Ollama (Local/Offline AI) — No Key Required',
+    icon: Box, // or Zap, but Box fits the "Local" feel well
     color: 'text-orange-400',
     borderColor: 'border-orange-400/20',
     bgColor: 'bg-orange-400/5',
-    placeholder: 'e.g., llama3.2, mistral, or gemma',
+    placeholder: 'e.g., llama3.2 (default)',
     steps: [
-      { text: 'Download & install Ollama', url: 'https://ollama.com/' },
-      { text: 'Run "ollama run llama3.2" in your terminal' },
-      { text: 'Keep the Ollama app open on your PC' },
-      { text: 'Enter the model name below (default: llama3.2)' },
+      { text: 'Download Ollama', url: 'https://ollama.com/download/OllamaSetup.exe' },
+      { text: 'Run the installer on your PC and keep it running in the background' },
+      { text: 'Your data never leaves this PC. Done!' },
+      { text: 'Type "llama3.2" it below and save' },
     ],
     link: 'https://ollama.com/',
   },
@@ -103,8 +73,7 @@ const API_GUIDES = {
       { text: 'Go to Anthropic Console', url: 'https://console.anthropic.com/settings/keys' },
       { text: 'Sign in or create an account' },
       { text: 'Click "Create Key"' },
-      { text: 'Add billing credits if needed', url: 'https://console.anthropic.com/settings/billing' },
-      { text: 'Copy the key and paste it below' },
+      { text: 'Add billing credits if needed' },
     ],
     link: 'https://console.anthropic.com/settings/keys',
   },
@@ -120,7 +89,6 @@ const API_GUIDES = {
       { text: 'Sign in or create an account' },
       { text: 'Generate an API key' },
       { text: 'Add credits to your account if needed' },
-      { text: 'Copy the key and paste it below' },
     ],
     link: 'https://www.perplexity.ai/settings/api',
   },
@@ -150,8 +118,6 @@ export function SettingsModal() {
   const freeModels: { key: GuideKey; field: keyof typeof keys }[] = [
     { key: 'gemini', field: 'gemini' },
     { key: 'groq', field: 'groq' },
-    { key: 'huggingface', field: 'huggingface' },
-    { key: 'deepseek', field: 'deepseek' },
     { key: 'ollama', field: 'ollama' },
   ];
 
@@ -189,7 +155,13 @@ export function SettingsModal() {
 
           {/* FREE MODELS SECTION */}
           <div className="space-y-4">
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider px-1">Free Models</h3>
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Free Models</h3>
+              <span className="text-[10px] font-medium text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded-full border border-orange-500/20">
+                Option B: Local AI (No Key) Available
+              </span>
+            </div>
+            
             {freeModels.map(({ key, field }) => (
               <KeySection
                 key={key}

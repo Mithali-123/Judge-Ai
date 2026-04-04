@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type ModelId = 'gemini' | 'gpt' | 'claude' | 'perplexity' | 'groq' | 'huggingface' | 'deepseek' | 'ollama';
+export type ModelId = 'gemini' | 'gpt' | 'claude' | 'perplexity' | 'groq' | 'ollama';
 
 export interface ModelResponse {
   model: ModelId;
@@ -31,8 +31,6 @@ export interface ApiKeys {
   claude: string;
   perplexity: string;
   groq: string;
-  huggingface: string;
-  deepseek: string;
   ollama: string;
 }
 
@@ -58,7 +56,7 @@ export const useChatStore = create<ChatState>()(
     (set, get) => ({
       chats: [],
       activeChatId: null,
-      apiKeys: { gemini: '', openai: '', claude: '', perplexity: '', groq: '', huggingface: '' ,deepseek: '',ollama: ''},
+      apiKeys: { gemini: '', openai: '', claude: '', perplexity: '', groq: '', ollama: ''},
       sidebarOpen: true,
       settingsOpen: false,
 

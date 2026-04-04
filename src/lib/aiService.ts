@@ -29,8 +29,13 @@ export async function streamGemini(
   signal?: AbortSignal
 ) {
   try {
+    // 1. Gemini specifically requires roles to be ONLY 'user' or 'model'. 
+    // It will crash/429 if it sees 'assistant' from our universal chat history.
     const messages = [
-      ...history.map(h => ({ role: h.role, parts: [{ text: h.content }] })),
+      ...history.map(h => ({ 
+        role: h.role === 'assistant' ? 'model' : 'user', // Translation fix
+        parts: [{ text: h.content }] 
+      })),
       { role: 'user', parts: [{ text: prompt }] }
     ];
 
@@ -46,7 +51,7 @@ export async function streamGemini(
 
     if (!res.ok) {
       const text = await res.text();
-      cb.onError(`Gemini error ${res.status}: ${text.slice(0, 200)}`);
+      cb.onError(`Gemini error: ${res.status}`);
       return;
     }
 
@@ -77,11 +82,6 @@ export async function streamOpenAI(
   signal?: AbortSignal
 ) {
   try {
-    const messages = [
-      ...history,
-      { role: 'user', content: prompt }
-    ];
-
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -89,16 +89,15 @@ export async function streamOpenAI(
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
-        messages,
+        model: 'gpt-4o-mini',
+        messages: [...history, { role: 'user', content: prompt }],
         stream: true,
       }),
       signal,
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      cb.onError(`GPT error ${res.status}: ${text.slice(0, 200)}`);
+      cb.onError(`OpenAI error: ${res.status}`);
       return;
     }
 
@@ -129,11 +128,6 @@ export async function streamGroq(
   signal?: AbortSignal
 ) {
   try {
-    const messages = [
-      ...history,
-      { role: 'user', content: prompt }
-    ];
-
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -142,15 +136,14 @@ export async function streamGroq(
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        messages,
+        messages: [...history, { role: 'user', content: prompt }],
         stream: true,
       }),
       signal,
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      cb.onError(`Groq error ${res.status}: ${text.slice(0, 200)}`);
+      cb.onError(`Groq error: ${res.status}`);
       return;
     }
 
@@ -173,36 +166,55 @@ export async function streamGroq(
   }
 }
 
-export async function streamHuggingFace(
-  apiKey: string,
+export async function streamOllama(
+  modelName: string,
   prompt: string,
   history: { role: string; content: string }[],
   cb: StreamCallbacks,
   signal?: AbortSignal
 ) {
   try {
-    const res = await fetch('https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3', {
+    const model = modelName || 'llama3.2';
+    const res = await fetch('http://localhost:11434/api/chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ inputs: prompt }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [...history, { role: 'user', content: prompt }],
+        stream: true,
+      }),
       signal,
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      cb.onError(`HF error ${res.status}: ${text.slice(0, 200)}`);
+      cb.onError("Ollama not found. Make sure the Ollama app is running.");
       return;
     }
 
-    const data = await res.json();
-    const text = data[0]?.generated_text || "Error fetching result";
-    cb.onDelta(text);
-    cb.onDone();
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const json = JSON.parse(line);
+          if (json.message?.content) cb.onDelta(json.message.content);
+          if (json.done) cb.onDone();
+        } catch (e) {}
+      }
+    }
   } catch (e: any) {
-    if (e.name !== 'AbortError') cb.onError(e.message);
+    // FIXED: Only show error if it wasn't purposefully stopped by the user!
+    if (e.name !== 'AbortError') {
+      cb.onError("Ensure Ollama is installed and running locally.");
+    }
   }
 }
 
@@ -214,11 +226,6 @@ export async function streamClaude(
   signal?: AbortSignal
 ) {
   try {
-    const messages = [
-      ...history.map(h => ({ role: h.role, content: h.content })),
-      { role: 'user', content: prompt }
-    ];
-
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -230,15 +237,14 @@ export async function streamClaude(
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
-        messages,
+        messages: [...history.map(h => ({ role: h.role, content: h.content })), { role: 'user', content: prompt }],
         stream: true,
       }),
       signal,
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      cb.onError(`Claude error ${res.status}: ${text.slice(0, 200)}`);
+      cb.onError(`Claude error: ${res.status}`);
       return;
     }
 
@@ -271,11 +277,6 @@ export async function streamPerplexity(
   signal?: AbortSignal
 ) {
   try {
-    const messages = [
-      ...history,
-      { role: 'user', content: prompt }
-    ];
-
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
@@ -284,15 +285,14 @@ export async function streamPerplexity(
       },
       body: JSON.stringify({
         model: 'sonar',
-        messages,
+        messages: [...history, { role: 'user', content: prompt }],
         stream: true,
       }),
       signal,
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      cb.onError(`Perplexity error ${res.status}: ${text.slice(0, 200)}`);
+      cb.onError(`Perplexity error: ${res.status}`);
       return;
     }
 
@@ -312,56 +312,6 @@ export async function streamPerplexity(
     cb.onDone();
   } catch (e: any) {
     if (e.name !== 'AbortError') cb.onError(e.message);
-  }
-}
-
-export async function streamOllama(
-  modelName: string, // For Ollama, the "API Key" field will hold the model name
-  prompt: string,
-  history: { role: string; content: string }[],
-  cb: StreamCallbacks,
-  signal?: AbortSignal
-) {
-  try {
-    const model = modelName || 'llama3.2'; // Default to llama3.2 if empty
-    const res = await fetch('http://localhost:11434/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: model,
-        messages: [...history, { role: 'user', content: prompt }],
-        stream: true,
-      }),
-      signal,
-    });
-
-    if (!res.ok) {
-      cb.onError("Ollama not found. Make sure the Ollama app is running on your PC.");
-      return;
-    }
-
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // Ollama uses a slightly different JSON format than OpenAI
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const json = JSON.parse(line);
-          if (json.message?.content) cb.onDelta(json.message.content);
-          if (json.done) cb.onDone();
-        } catch (e) {}
-      }
-    }
-  } catch (e: any) {
-    cb.onError("Ollama Error: Ensure Ollama is running locally (http://localhost:11434)");
   }
 }
 
@@ -371,59 +321,12 @@ export interface ModelConfig {
   streamFn: (apiKey: string, prompt: string, history: { role: string; content: string }[], cb: StreamCallbacks, signal?: AbortSignal) => Promise<void>;
   apiKeyField: keyof import('@/store/chatStore').ApiKeys;
 }
-export async function streamDeepSeek(
-  apiKey: string,
-  prompt: string,
-  history: { role: string; content: string }[],
-  cb: StreamCallbacks,
-  signal?: AbortSignal
-) {
-  try {
-    const res = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [...history, { role: 'user', content: prompt }],
-        stream: true,
-      }),
-      signal,
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      cb.onError(`DeepSeek error ${res.status}: ${text.slice(0, 200)}`);
-      return;
-    }
-
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      buffer = parseSSE(buffer, (json) => {
-        const text = json?.choices?.[0]?.delta?.content;
-        if (text) cb.onDelta(text);
-      });
-    }
-    cb.onDone();
-  } catch (e: any) {
-    if (e.name !== 'AbortError') cb.onError(e.message);
-  }
-}
 
 export const MODEL_CONFIGS: ModelConfig[] = [
   { id: 'gemini', label: 'Gemini 2.5 Flash', streamFn: streamGemini, apiKeyField: 'gemini' },
-  { id: 'gpt', label: 'ChatGPT (GPT-4o mini)', streamFn: streamOpenAI, apiKeyField: 'openai' }, // UPDATED LABEL
-  { id: 'ollama', label: 'Ollama (Local Free)', streamFn: streamOllama, apiKeyField: 'ollama' }, // NEW FREE TOOL
+  { id: 'gpt', label: 'ChatGPT (GPT-4o mini)', streamFn: streamOpenAI, apiKeyField: 'openai' },
+  { id: 'ollama', label: 'Ollama (Local Free) [Needs installation to work]', streamFn: streamOllama, apiKeyField: 'ollama' },
   { id: 'groq', label: 'Groq (Llama 3)', streamFn: streamGroq, apiKeyField: 'groq' },
-  { id: 'huggingface', label: 'HuggingFaceH4/zephyr-7b-beta', streamFn: streamHuggingFace, apiKeyField: 'huggingface' },
   { id: 'claude', label: 'Claude Sonnet 4 (Requires Payment)', streamFn: streamClaude, apiKeyField: 'claude' },
   { id: 'perplexity', label: 'Perplexity Sonar (Requires Payment)', streamFn: streamPerplexity, apiKeyField: 'perplexity' },
 ];
@@ -433,8 +336,6 @@ export function generateJudgeSummary(responses: { model: string; label: string; 
   summary += `| Metric | ${responses.map(r => r.label).join(' | ')} |\n`;
   summary += `|--------${responses.map(() => '|--------').join('')}|\n`;
   summary += `| Response Length | ${responses.map(r => `${r.content.length} chars`).join(' | ')} |\n`;
-  
-  // FIXED: Removed raw regex backticks that broke compilation, using simple includes
   summary += `| Contains Code | ${responses.map(r => r.content.includes('\`\`\`') ? '✅' : '❌').join(' | ')} |\n`;
 
   const maxLen = Math.max(...responses.map(r => r.content.length));

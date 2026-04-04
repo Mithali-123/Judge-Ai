@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
 
 interface Props {
   onSend: (text: string) => void;
   disabled?: boolean;
+  isStreaming?: boolean; // New prop
+  onStop?: () => void;   // New prop
 }
 
-export function PromptInput({ onSend, disabled }: Props) {
+export function PromptInput({ onSend, disabled, isStreaming, onStop }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -17,7 +19,16 @@ export function PromptInput({ onSend, disabled }: Props) {
     }
   }, [value]);
 
-  const handleSubmit = () => {
+  const handleSubmit = (e?: React.MouseEvent | React.KeyboardEvent) => {
+    if (e) e.preventDefault();
+    
+    // If it's streaming, hitting the button should STOP it
+    if (isStreaming && onStop) {
+      onStop();
+      return;
+    }
+
+    // Otherwise, handle the normal send
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
@@ -27,7 +38,10 @@ export function PromptInput({ onSend, disabled }: Props) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit();
+      // Only allow sending via Enter if we are NOT currently streaming
+      if (!isStreaming) {
+        handleSubmit();
+      }
     }
   };
 
@@ -40,15 +54,21 @@ export function PromptInput({ onSend, disabled }: Props) {
         onKeyDown={handleKeyDown}
         placeholder="Ask anything..."
         rows={1}
-        disabled={disabled}
+        // We only disable the textarea during streaming, not the button!
+        disabled={isStreaming} 
         className="flex-1 resize-none bg-transparent px-4 py-3.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50 font-body"
       />
       <button
         onClick={handleSubmit}
-        disabled={!value.trim() || disabled}
+        // The button is active if it's streaming (so we can stop it) OR if there's text to send
+        disabled={(!value.trim() && !isStreaming) || (disabled && !isStreaming)}
         className="m-2 flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-20 hover:opacity-90 transition-all shrink-0 shadow-md"
       >
-        <ArrowUp className="h-4 w-4" />
+        {isStreaming ? (
+          <Square className="h-4 w-4" fill="currentColor" />
+        ) : (
+          <ArrowUp className="h-4 w-4" />
+        )}
       </button>
     </div>
   );

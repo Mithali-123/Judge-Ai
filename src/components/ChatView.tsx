@@ -4,19 +4,15 @@ import { MODEL_CONFIGS, generateJudgeSummary } from '@/lib/aiService';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ThinkingDots } from './ThinkingDots';
 import { PromptInput } from './PromptInput';
-// ADDED BOX ICON FOR HUGGING FACE
 import { Scale, Sparkles, Cpu, Brain, Search, PanelLeft, Zap, Code, BookOpen, Copy, Edit2, Check, ThumbsUp, ThumbsDown, Box } from 'lucide-react';
 
-// FIXED: ADDED GROQ AND HUGGINGFACE ICONS
 const MODEL_ICONS: Record<ModelId, { icon: React.ElementType; className: string }> = {
   gemini: { icon: Sparkles, className: 'text-gemini' },
   gpt: { icon: Cpu, className: 'text-gpt' },
   claude: { icon: Brain, className: 'text-claude' },
   perplexity: { icon: Search, className: 'text-perplexity' },
   groq: { icon: Zap, className: 'text-green-400' },
-  huggingface: { icon: Box, className: 'text-yellow-400' },
-  deepseek: { icon: Brain, className: 'text-blue-400' },
-  ollama: { icon: Zap, className: 'text-orange-400' }, // Ollama Icon
+  ollama: { icon: Zap, className: 'text-orange-400' }, 
 };
 
 const SUGGESTIONS = [
@@ -28,7 +24,28 @@ const SUGGESTIONS = [
 export function ChatView() {
   const { chats, activeChatId, apiKeys, addMessage, updateMessage, createChat, sidebarOpen, toggleSidebar } = useChatStore();
   const [isStreaming, setIsStreaming] = useState(false);
+  
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isAutoScrolling = useRef(true); 
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isProcessingRef = useRef(false);
+
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsStreaming(false);
+    isProcessingRef.current = false; // FIX: Ensure stopping also unlocks the app!
+  }, []);
+
+  const handleScroll = () => {
+    if (scrollContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
+      isAutoScrolling.current = isAtBottom;
+    }
+  };
 
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
@@ -51,96 +68,154 @@ export function ChatView() {
   const messages = activeChat?.messages || [];
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isAutoScrolling.current && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'auto' }); 
+    }
   }, [messages]);
 
   const handleSend = useCallback(async (prompt: string) => {
-    if (isStreaming) return;
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    abortControllerRef.current = new AbortController();
+    isAutoScrolling.current = true; 
+    setIsStreaming(true);
 
-    let chatId = activeChatId;
-    if (!chatId) {
-      chatId = createChat();
-    }
-
+    try {
+      let chatId = activeChatId;
+      if (!chatId) {
+        chatId = createChat();
+      }
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: prompt,
-      timestamp: Date.now(),
-    };
-    addMessage(chatId, userMsg);
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: prompt,
+        timestamp: Date.now(),
+      };
+      addMessage(chatId, userMsg);
 
-    const activeModels = MODEL_CONFIGS.filter(m => !!apiKeys[m.apiKeyField]);
+    const isOnline = navigator.onLine;
+
+    const activeModels = MODEL_CONFIGS.filter(m => {
+        const hasKey = !!apiKeys[m.apiKeyField];
+        if (!isOnline) {
+          return m.id === 'ollama' && hasKey;
+        }
+        return hasKey;
+      });
 
     if (activeModels.length === 0) {
-      const assistantId = crypto.randomUUID();
+        const assistantId = crypto.randomUUID();
+        const errorMessage = !isOnline 
+          ? '🛜 **You are offline.** To use the app offline, go to Settings and set up Option B: Local AI.'
+          : '⚠️ No API keys configured. Click **API Keys** in the sidebar to add at least one API key.';
+          
+        addMessage(chatId, {
+          id: assistantId,
+          role: 'assistant',
+          content: errorMessage,
+          timestamp: Date.now(),
+        });
+        return; // The 'finally' block below will safely unlock this!
+      }
+
+    const assistantId = crypto.randomUUID();
+      const initialResponses: ModelResponse[] = activeModels.map(m => ({
+        model: m.id,
+        content: '',
+        done: false,
+      }));
+
       addMessage(chatId, {
         id: assistantId,
         role: 'assistant',
-        content: '⚠️ No API keys configured. Click **API Keys** in the sidebar to add at least one API key.',
+        content: '',
+        modelResponses: initialResponses,
         timestamp: Date.now(),
       });
-      return;
-    }
 
-    const assistantId = crypto.randomUUID();
-    const initialResponses: ModelResponse[] = activeModels.map(m => ({
-      model: m.id,
-      content: '',
-      done: false,
-    }));
-
-    addMessage(chatId, {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      modelResponses: initialResponses,
-      timestamp: Date.now(),
-    });
-    setIsStreaming(true);
-
-    const history = messages
-      .filter(m => m.role === 'user')
-      .map(m => ({ role: 'user' as const, content: m.content }));
-
-    const state: Record<ModelId, { text: string; done: boolean }> = {} as any;
-    activeModels.forEach(m => { state[m.id] = { text: '', done: false }; });
-
-    const updateResponses = () => {
-      const responses: ModelResponse[] = activeModels.map(m => ({
-        model: m.id,
-        content: state[m.id].text,
-        done: state[m.id].done,
+    // FIX: We combine the existing messages with the freshly created userMsg 
+    // to avoid the stale state bug where React hasn't updated 'messages' yet.
+    // FIX: Create a properly alternating User -> Assistant history.
+    // Local models (Ollama) will hallucinate/loop if they see consecutive user messages.
+    // We DO NOT append userMsg here because 'prompt' is already passed to streamFn separately.
+    const history = messages.map(m => ({
+        role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+        content: m.role === 'user' 
+          ? m.content 
+          : (m.judgeSummary || m.content || "Provided an answer.") 
       }));
-      updateMessage(chatId!, assistantId, { modelResponses: responses });
-    };
 
-    const checkDone = () => {
-      if (activeModels.every(m => state[m.id].done)) {
-        const summaryData = activeModels.map(m => ({
+      const state: Record<ModelId, { text: string; done: boolean }> = {} as any;
+      activeModels.forEach(m => { state[m.id] = { text: '', done: false }; });
+
+      const updateResponses = () => {
+        const responses: ModelResponse[] = activeModels.map(m => ({
           model: m.id,
-          label: m.label,
           content: state[m.id].text,
+          done: state[m.id].done,
         }));
-        const summary = generateJudgeSummary(summaryData);
-        updateMessage(chatId!, assistantId, { judgeSummary: summary });
-        setIsStreaming(false);
-      }
-    };
+        updateMessage(chatId!, assistantId, { modelResponses: responses });
+      };
+
+      const checkDone = () => {
+        if (activeModels.every(m => state[m.id].done)) {
+          const summaryData = activeModels.map(m => ({
+            model: m.id,
+            label: m.label,
+            content: state[m.id].text,
+          }));
+          const summary = generateJudgeSummary(summaryData);
+          updateMessage(chatId!, assistantId, { judgeSummary: summary });
+          setIsStreaming(false);
+        }
+      };
 
     const promises = activeModels.map(config =>
-      config.streamFn(apiKeys[config.apiKeyField], prompt, history, {
-        onDelta: (text) => { state[config.id].text += text; updateResponses(); },
-        onDone: () => { state[config.id].done = true; updateResponses(); checkDone(); },
-        onError: (err) => { state[config.id].text += `\n\n❌ Error: ${err}`; state[config.id].done = true; updateResponses(); checkDone(); },
-      })
-    );
+        config.streamFn(
+          apiKeys[config.apiKeyField], 
+          prompt, 
+          history, 
+          {
+            onDelta: (text) => { 
+              if (abortControllerRef.current?.signal.aborted) return;
+              state[config.id].text += text; 
+              updateResponses(); 
+            },
+            onDone: () => { 
+              if (abortControllerRef.current?.signal.aborted) return;
+              state[config.id].done = true; 
+              updateResponses(); 
+              checkDone();
+            },
+            onError: (err) => { 
+              if (abortControllerRef.current?.signal.aborted) return;
+              let errorMsg = `\n\n❌ Error: ${err}`;
+              if (err.toString().includes('429')) {
+                errorMsg += `\n\n> **Tip:** You have hit the rate limit. Please create a new API key and save it in settings to continue.`;
+              }
+              state[config.id].text += errorMsg; 
+              state[config.id].done = true; 
+              updateResponses(); 
+              checkDone(); 
+            },
+          },
+          abortControllerRef.current?.signal
+        )
+      );
 
     updateResponses();
-    await Promise.all(promises);
-    checkDone();
-  }, [isStreaming, activeChatId, apiKeys, messages, addMessage, updateMessage, createChat]);
+      await Promise.all(promises);
+      checkDone();
+      
+    } finally {
+      // 4. THE BULLETPROOF UNLOCK
+      // This block runs no matter what—even if the app crashes, streams break, or early returns happen.
+      isProcessingRef.current = false;
+      setIsStreaming(false);
+    }
+  }, [activeChatId, apiKeys, messages, addMessage, updateMessage, createChat]);
 
+  // --- UI RENDER: EMPTY STATE ---
   if (!activeChat || messages.length === 0) {
     return (
       <div className="flex-1 flex flex-col h-screen relative">
@@ -156,9 +231,16 @@ export function ChatView() {
             <Scale className="h-14 w-14 text-judge-gold" />
             <div className="absolute -inset-4 bg-judge-gold/10 rounded-full blur-xl -z-10 animate-glow-pulse" />
           </div>
-          <h1 className="font-display text-3xl md:text-[40px] font-bold text-gradient-gold mb-3 text-center leading-tight animate-fade-in">
-            Where should we start?
-          </h1>
+          <div className="flex flex-col items-center justify-center">
+            {!navigator.onLine && (
+              <span className="mb-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-500 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+                <Box className="w-3 h-3" /> Offline Privacy Mode Active
+              </span>
+            )}
+            <h1 className="font-display text-3xl md:text-[40px] font-bold text-gradient-gold mb-3 text-center leading-tight animate-fade-in">
+              Where should we start?
+            </h1>
+          </div>
           <p className="text-muted-foreground text-sm mb-10 text-center max-w-md animate-fade-in" style={{ animationDelay: '0.1s' }}>
             Multiple AI models answer simultaneously. The Judge compares.
           </p>
@@ -179,12 +261,18 @@ export function ChatView() {
           </div>
         </div>
         <div className="w-full max-w-3xl mx-auto pb-6 px-4">
-          <PromptInput onSend={handleSend} disabled={isStreaming} />
+          <PromptInput 
+            onSend={handleSend} 
+            disabled={isStreaming} 
+            isStreaming={isStreaming} 
+            onStop={stopGeneration}
+          />
         </div>
       </div>
     );
   }
 
+  // --- UI RENDER: ACTIVE CHAT STATE ---
   return (
     <div className="flex-1 flex flex-col h-screen relative">
       {!sidebarOpen && (
@@ -195,7 +283,11 @@ export function ChatView() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-6 scroll-smooth">
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 py-6 scroll-smooth"
+      >
         <div className="max-w-4xl mx-auto space-y-8">
           {messages.map((message, index) => (
             <div key={message.id || index} className={`flex flex-col group ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -274,7 +366,12 @@ export function ChatView() {
       </div>
 
       <div className="w-full max-w-4xl mx-auto pb-6 px-4 bg-gradient-to-t from-background via-background to-transparent pt-4">
-        <PromptInput onSend={handleSend} disabled={isStreaming} />
+        <PromptInput 
+          onSend={handleSend} 
+          disabled={isStreaming} 
+          isStreaming={isStreaming} 
+          onStop={stopGeneration}
+        />
       </div>
     </div>
   );
